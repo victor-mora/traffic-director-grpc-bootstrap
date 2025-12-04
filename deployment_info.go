@@ -27,6 +27,7 @@ const (
 	deploymentTypeUnknown deploymentType = iota
 	deploymentTypeGKE
 	deploymentTypeGCE
+	deploymentTypeCloudRun
 )
 
 // getDeploymentType tries to talk the metadata server at
@@ -57,6 +58,8 @@ func getDeploymentType() (deploymentType, error) {
 			return deploymentTypeGKE, nil
 		case "Metadata Server for VM":
 			return deploymentTypeGCE, nil
+		case "Metadata Server for Serverless":
+			return deploymentTypeCloudRun, nil
 		default:
 			return deploymentTypeUnknown, fmt.Errorf("unknown Server type: %s", val)
 		}

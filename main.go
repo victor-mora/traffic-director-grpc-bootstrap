@@ -33,9 +33,9 @@ import (
 	"strings"
 	"time"
 
-	"td-grpc-bootstrap/csmnamer"
+	"google3/third_party/golang/github_com/GoogleCloudPlatform/traffic_director_grpc_bootstrap/v/v0/csmnamer/csmnamer"
 
-	"github.com/google/uuid"
+	"google3/third_party/golang/googleuuid/uuid"
 )
 
 var (
@@ -44,6 +44,7 @@ var (
 	gcpProjectNumber           = flag.Int64("gcp-project-number", 0, "the gcp project number. If unknown, can be found via 'gcloud projects list'")
 	vpcNetworkName             = flag.String("vpc-network-name", "default", "VPC network name")
 	localityZone               = flag.String("locality-zone", "", "the locality zone to use, instead of retrieving it from the metadata server. Useful when not running on GCP and/or for testing")
+	localityRegion             = flag.String("locality-region", "", "the locality region to use, instead of retrieving it from the metadata server. Useful when not running on GCP and/or for testing")
 	ignoreResourceDeletion     = flag.Bool("ignore-resource-deletion-experimental", false, "assume missing resources notify operators when using Traffic Director, as in gRFC A53. This is not currently the case. This flag is EXPERIMENTAL and may be changed or removed in a later release.")
 	secretsDir                 = flag.String("secrets-dir", "/var/run/secrets/workload-spiffe-credentials", "path to a directory containing TLS certificates and keys required for PSM security")
 	gkeClusterName             = flag.String("gke-cluster-name", "", "GKE cluster name to use, instead of retrieving it from the metadata server.")
@@ -90,27 +91,41 @@ func main() {
 		}
 	}
 
-	ip, err := getHostIP()
+	var ip string
+	var err error
+	ip, err = getHostIP()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to determine host's IP: %s\n", err)
 	}
 
+	var dType deploymentType
+	dType, err = getDeploymentType()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: unable to determine deployment type: %s\n", err)
+	}
+
 	// Retrieve zone from the metadata server only if not specified in args.
 	zone := *localityZone
-	if zone == "" {
-		zone, err = getZone()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: %s\n", err)
+	region := *localityRegion
+	if dType == deploymentTypeCloudRun {
+		if region == "" {
+			region, err = getRegion()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", err)
+			}
+		}
+	} else {
+		if zone == "" {
+			zone, err = getZone()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", err)
+			}
 		}
 	}
 
 	// Generate deployment info from metadata server or from command-line
 	// arguments, with the latter taking preference.
 	var deploymentInfo map[string]string
-	dType, err := getDeploymentType()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: unable to determine deployment type: %s\n", err)
-	}
 	switch dType {
 	case deploymentTypeGKE:
 		cluster := *gkeClusterName
@@ -152,6 +167,16 @@ func main() {
 			"GCE-VM":      vmName,
 			"GCP-ZONE":    zone,
 			"INSTANCE-IP": ip,
+		}
+	case deploymentTypeCloudRun:
+		instanceID, err := getInstanceID()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %s\n", err)
+		} else {
+			fmt.Printf("instanceID: %s\n", instanceID)
+			deploymentInfo = map[string]string{
+				"INSTANCE-ID": instanceID,
+			}
 		}
 	}
 
@@ -199,6 +224,7 @@ func main() {
 		vpcNetworkName:             *vpcNetworkName,
 		ip:                         ip,
 		zone:                       zone,
+		region:                     region,
 		ignoreResourceDeletion:     *ignoreResourceDeletion,
 		secretsDir:                 *secretsDir,
 		metadataLabels:             nodeMetadata,
@@ -254,6 +280,7 @@ type configInput struct {
 	vpcNetworkName             string
 	ip                         string
 	zone                       string
+	region                     string
 	ignoreResourceDeletion     bool
 	secretsDir                 string
 	metadataLabels             map[string]string
@@ -308,7 +335,8 @@ func generate(in configInput) ([]byte, error) {
 			ID:      fmt.Sprintf("projects/%d/networks/%s/nodes/%s", in.gcpProjectNumber, networkIdentifier, uuid.New().String()),
 			Cluster: "cluster", // unused by TD
 			Locality: &locality{
-				Zone: in.zone,
+				Zone:   in.zone,
+				Region: in.region,
 			},
 			Metadata: map[string]any{
 				"INSTANCE_IP": in.ip,
@@ -401,6 +429,12 @@ func getHostIP() (string, error) {
 	return addrs[0], nil
 }
 
+// For use by Cloud Run deployment type (uses Region instead of Zone).
+func getRegion() (string, error) {
+	// Querying the MDS for the zone results in the region for Cloud Run.
+	return getZone()
+}
+
 func getZone() (string, error) {
 	qualifiedZone, err := getFromMetadata("http://metadata.google.internal/computeMetadata/v1/instance/zone")
 	if err != nil {
@@ -456,6 +490,14 @@ func getVMName() string {
 		return ""
 	}
 	return string(vm)
+}
+
+func getInstanceID() (string, error) {
+	instanceID, err := getFromMetadata("http://metadata.google.internal/computeMetadata/v1/instance/id")
+	if err != nil {
+		return "", fmt.Errorf("failed to determine instance id: %w", err)
+	}
+	return string(instanceID), nil
 }
 
 // isIPv6Capable returns true if the VM is configured with an IPv6 address.
