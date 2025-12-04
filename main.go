@@ -33,9 +33,9 @@ import (
 	"strings"
 	"time"
 
-	"google3/third_party/golang/github_com/GoogleCloudPlatform/traffic_director_grpc_bootstrap/v/v0/csmnamer/csmnamer"
+	"td-grpc-bootstrap/csmnamer"
 
-	"google3/third_party/golang/googleuuid/uuid"
+	"github.com/google/uuid"
 )
 
 var (
