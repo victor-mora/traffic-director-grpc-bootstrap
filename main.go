@@ -91,15 +91,12 @@ func main() {
 		}
 	}
 
-	var ip string
-	var err error
-	ip, err = getHostIP()
+	ip, err := getHostIP()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to determine host's IP: %s\n", err)
 	}
 
-	var dType deploymentType
-	dType, err = getDeploymentType()
+	dType, err := getDeploymentType()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: unable to determine deployment type: %s\n", err)
 	}
@@ -169,11 +166,11 @@ func main() {
 			"INSTANCE-IP": ip,
 		}
 	case deploymentTypeCloudRun:
-		instanceID, err := getInstanceID()
+		instanceID, err := getCloudRunInstanceID()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: %s\n", err)
+			os.Exit(1)
 		} else {
-			fmt.Printf("instanceID: %s\n", instanceID)
 			deploymentInfo = map[string]string{
 				"INSTANCE-ID": instanceID,
 			}
@@ -492,7 +489,7 @@ func getVMName() string {
 	return string(vm)
 }
 
-func getInstanceID() (string, error) {
+func getCloudRunInstanceID() (string, error) {
 	instanceID, err := getFromMetadata("http://metadata.google.internal/computeMetadata/v1/instance/id")
 	if err != nil {
 		return "", fmt.Errorf("failed to determine instance id: %w", err)
